@@ -1,2 +1,3 @@
 # MapBattle_ReinforcementLearning
-Using QLearning to play MapBattle
+MapBattle using Reinforcement Learning
+![scrrenshot](img/MapB.gif)
