@@ -14,10 +14,10 @@ class Board{
     this.slowFactor = 6
 
     this.players = [
-      //new Player(1, [20,15], this.state, this.blockSize, 'rgba(10,15,180,1)', ['ArrowUp', 'ArrowRight', 'ArrowDown','ArrowLeft'], [5,.80, 2.5, .25, 2.3]),
-      //new Player(2, [9,15], this.state, this.blockSize, 'rgba(75,05,180,1)', ['KeyW', 'KeyD', 'KeyS','KeyA'], [5,.80, 2.5, .25, 2.3]),
-                                                                                                        //wall, opoonenet terr, my trail, opponent trail, open space
-      new Player(1, this.getFreeSpaceCoordinates(), this.state, this.blockSize, 'rgba(10,10,180,1)', []),
+      new Player(1, [20,15], this.state, this.blockSize, 'rgba(10,15,180,1)', ['ArrowUp', 'ArrowRight', 'ArrowDown','ArrowLeft']),
+      //new Player(2, [9,15], this.state, this.blockSize, 'rgba(75,05,180,1)', ['KeyW', 'KeyD', 'KeyS','KeyA']),
+                                                                                                        
+      //new Player(1, this.getFreeSpaceCoordinates(), this.state, this.blockSize, 'rgba(10,10,180,1)', []),
       new Player(2, this.getFreeSpaceCoordinates(), this.state, this.blockSize, 'rgba(180,10,10,1)', []),
       new Player(3, this.getFreeSpaceCoordinates(), this.state, this.blockSize, 'rgba(10,180,10,1)', []),
     ]
