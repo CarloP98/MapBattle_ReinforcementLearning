@@ -1,28 +1,31 @@
 class Player{
-  constructor(id, coords, state, size,  color, controls=[]){
-    this.size = size
-    this.bot = (controls.length==0);
-    this.playerId = id;
-    this.near = true
-    this.visionArea = [7,7];
-    this.controls = controls;
-    this.agent = new Agent((7 * 7*6)-6);
+  constructor(id, coords, color, controls=[]){
+    //player logistics
+    this.trail = {};
+    this.alive = false;
     this.direction = 0;
-    this.alive = true
-
+    this.playerId = id;
+    this.controls = controls;
+    [this.y, this.x] = coords;
+    //agent
+    this.agent = new Agent();
+    this.bot = (controls.length!==4);
+    //colors
     this.color = color;
     this.trailColor = this.color.replace(/[^,]+(?=\))/, '0.4');
     this.conquerColor = this.color.replace(/[^,]+(?=\))/, '.7');
-
-    this.trail = {};
-    this.trailStart = null;
-    this.conqueredSpace = {};
-    [this.x, this.y] = coords;
-
-    this.joinGame(state, this.x, this.y);
-
+    //Key events
     if(this.controls.length == 4)
       window.addEventListener('keydown',this.changeDirection.bind(this),false);
+  }
+
+  nextPos(state){
+    let nextY = this.y + (this.direction==2?1:this.direction==0?-1:0)
+    let nextX = this.x + (this.direction==1?1:this.direction==3?-1:0)
+    //check out of bounds
+    if(!(state[nextY]||[])[nextX])
+      return null
+    return {y:nextY, x:nextX, new:state[nextY][nextX], old:state[this.y][this.x]}
   }
 
   changeDirection(e) {
@@ -32,30 +35,98 @@ class Player{
     else if(e.code == this.controls[3]) this.direction = 3;
   }
 
-  fillConquered(state){
-    var conqueredBlocks = 0
-    var conqueredDict = {}
+  removePlayer(state){
+    this.alive = false;
+    state.forEach((r,i) => {r.forEach((c,j) => {c.remPlayer(this.playerId);})})
+  }
 
-    for(let [key, value] of Object.entries(this.trail)){
-      conqueredBlocks += 1
-      var [Y,X] = key.split(",").map(Number);
-      if(this.trail[[Y,X]] != '0'){
-        var plr = this.trail[[Y,X]].replace(/(^\d+)(.+$)/i,'$1')
-        if(!conqueredDict[plr])
-          conqueredDict[plr]=[]
-        conqueredDict[plr].push([Y,X])
-      }
-      else if (this.trail[[Y,X]].substr(-1) == 'c')
-      {
-        var plr = this.trail[[Y,X]].replace(/(^\d+)(.+$)/i,'$1')
-      }
-      this.conqueredSpace[[Y,X]]=this.playerId;
-      state[Y][X] = this.playerId +'c';
+  update(state){
+    let killed = [];
+    let [botdir, currState, reward, train] = [1, null, [0,0,0],true];
+
+    if(this.bot){
+      currState = this.playerView(state)[0];
+      botdir = this.agent.getBestMove(currState)
+      if(botdir == 0)
+          this.direction = (this.direction-1<0)?3:this.direction-1
+      else if(botdir == 2)
+          this.direction = (this.direction+1>3)?0:this.direction+1
     }
 
-    var Row = state.length;
-    var Col = state[0].length;
-    var copy = state.map(arr => arr.slice());
+    //get next position
+    let pos = this.nextPos(state)
+    //if out of bounds
+    if(!pos){
+      reward[botdir] -= 1;
+      this.agent.train(currState, null, reward);
+      return [this.playerId];
+    }
+    //if on own trail
+    else if(pos.new.oid===this.playerId && pos.new.over === Over.trail){
+      reward[botdir] -= 1;
+      this.agent.train(currState, null, reward);
+      return [this.playerId];
+    }
+    //if on another player
+    else if(pos.new.oid!==this.playerId && pos.new.over === Over.player){
+      reward[botdir] -= 1;
+      this.agent.train(currState, null, reward);
+      return [this.playerId];
+    }
+    //if on opponent trail
+    else if(pos.new.oid !== this.playerId && pos.new.over === Over.trail){
+      reward[botdir] += 5;
+      killed.push(pos.new.oid);
+    }
+    //update trail
+    if(pos.new.uid !== this.playerId){
+      if(Object.keys(this.trail).length===0){reward[botdir] += 1; this.agent.train(currState, null, reward); train=false;}
+      this.trail[[pos.y,pos.x]] = 1;
+    }
+    //update position
+    pos.new.setOver(this.playerId,Over.player);
+    pos.old.setOver();
+    if(pos.old.uid !== this.playerId)
+      pos.old.setOver(this.playerId,Over.trail);
+    [this.y, this.x] = [pos.y,pos.x];
+    //if new conquered
+    if(pos.new.uid === this.playerId && Object.keys(this.trail).length > 0){
+      let [score, kills] = this.fillConquered(state);
+      reward[botdir] += Math.min(10,score);
+      killed.push(...kills);
+      this.agent.train(currState, null, reward);
+      return killed;
+    }
+    //train continuous actions
+    if(this.bot && train){
+      var [nextState, tf] = this.playerView(state);
+      reward[botdir] -= tf;
+      this.agent.train(currState, nextState, reward);
+    }
+    return killed;
+  }
+
+  joinGame(state, y=this.y, x=this.x){
+    this.alive = true;
+    [this.y, this.x] = [y,x];
+    this.trail = {};
+    this.direction = 0;
+    for(var i=-1; i<2; i++)
+      for(var j=-1; j<2; j++)
+        state[y+j][x+i].setCellInfo(this.playerId, Under.conquered);
+    state[y][x].setOver(this.playerId, Over.player);
+  }
+
+  fillConquered(state){
+    var [conqueredBlocks, killed] = [0,[]]
+
+    for(let [key, value] of Object.entries(this.trail)){
+      var [Y,X] = key.split(",").map(Number);
+      conqueredBlocks += 1
+      state[Y][X].setCellInfo(this.playerId, Under.conquered);
+    }
+    this.trail = {};
+    var [Row,Col,copy] = [state.length, state[0].length, state.map(arr => arr.slice())];
 
     function floodFillUtil(x,y){
       if (x < 0 || x >= Row || y < 0 || y >= Col)
@@ -71,12 +142,7 @@ class Player{
 
     for (let i = 0; i < Row; i++)
       for (let j = 0; j < Col; j++)
-        if(this.conqueredSpace[[i,j]])
-          copy[i][j] = 'O';
-        else if (parseInt(copy[i][j].charAt(0)) != this.playerId)
-          copy[i][j] = '-';
-        else
-          copy[i][j] = 'O';
+          copy[i][j] = (copy[i][j].uid != this.playerId)?'-':'O';
 
     for (let i = 0; i < Row; i++)
       if (copy[i][0] == '-')
@@ -94,266 +160,92 @@ class Player{
     for (let i = 0; i < Row; i++){
       for (let j = 0; j < Col; j++){
         if (copy[i][j] == '-'){
-          if(state[i][j] != '0'){
-            var plr = state[i][j].replace(/(^\d+)(.+$)/i,'$1')
-            var type = state[i][j].substr(-1)
-            if(plr != this.playerId){
-              if(!conqueredDict[plr])
-                conqueredDict[plr]=[]
-              conqueredDict[plr].push([i,j])
-            }
-          }
-          state[i][j] = this.playerId + "c"
-          this.conqueredSpace[[i,j]]=1;
-          conqueredBlocks += 1
+          if(state[i][j].under !== Under.empty)
+            if(state[i][j].uid != this.playerId)
+              killed.push(state[i][j].uid);
+          state[i][j].setCellInfo(this.playerId, Under.conquered);
+          conqueredBlocks += 1;
         }
       }
     }
-    return [conqueredBlocks, conqueredDict]
+    return [conqueredBlocks, killed]
   }
 
-  clear(state){
-    state[this.y][this.x] = '0';
-    for(let [key, value] of Object.entries(this.trail)){
-      var [Y,X] = key.split(",").map(Number);
-      state[Y][X] = '0';
-    }
-    for(let [key, value] of Object.entries(this.conqueredSpace)){
-      var [Y,X] = key.split(",").map(Number);
-      state[Y][X] = '0';
-    }
-    this.trail = {}
-    this.conqueredSpace = {}
-    this.alive = false
-  }
+  playerView(state, playerCtx=null){
+    let [x,y] = [this.agent.visionArea[0], this.agent.visionArea[1]]
+    let [xShift,yShift] = [Math.floor(x/2),Math.floor(y/2)]
+    var vis = state.filter((_, i) => i >= (this.y-yShift) && i < (this.y-yShift + y)).map(a => a.slice(Math.max(0,this.x-xShift), Math.max(0,this.x-xShift) + x+Math.min(0,this.x-xShift)))
 
-  reset(state, coords){
-    this.alive = true
-    this.x = coords[1];
-    this.y = coords[0];
-    this.direction = 0;
-    this.joinGame(state, this.x, this.y)
-  }
-
-  render(ctx){
-    if(!this.alive)
-      return
-
-    for(let [key, value] of Object.entries(this.conqueredSpace)){
-      ctx.beginPath();
-      var [Y,X] = key.split(",").map(Number);
-      ctx.shadowOffsetY = 0;
-      ctx.fillStyle = this.conquerColor;
-      ctx.rect(X*this.size, Y*this.size, this.size, this.size);
-      ctx.fill();
-    }
-    for(let [key, value] of Object.entries(this.trail)){
-      var [Y,X] = key.split(",").map(Number);
-      ctx.beginPath();
-      ctx.shadowOffsetY = 0;
-      ctx.fillStyle = this.trailColor;
-      ctx.rect(X*this.size, Y*this.size, this.size, this.size);
-      ctx.fill();
-    }
-      ctx.shadowColor = 'rgb(64,64,64)';
-      ctx.shadowOffsetY = 2;
-      ctx.beginPath();
-      ctx.fillStyle = this.color;
-      ctx.rect(this.x*this.size, this.y*this.size, this.size, this.size);
-      ctx.fill();
-
-    //vision area
-    //ctx.beginPath();
-    //ctx.fillStyle = 'rgba(128,128,128, .1)';
-    //ctx.rect(this.x*this.size-((this.visionArea[0]*this.size-this.size)/2), this.y*this.size-((this.visionArea[1]*this.size-this.size)/2), this.visionArea[0]*this.size, this.visionArea[1]*this.size);
-    //ctx.fill();
-  }
-
-  update(state){
-    state[this.y][this.x] = this.playerId+'p';
-    var currState = this.nnInput(state)
-    var reward = [0,0,0];
-    var ret = null;
-
-    //if bot, get best direction
-    if(this.bot){
-      var botDirection = this.agent.getBestMove(currState)
-      if(botDirection == 0)
-          this.direction = (this.direction-1<0)?3:this.direction-1
-      else if(botDirection == 2)
-          this.direction = (this.direction+1>3)?0:this.direction+1
-    }
-
-    //calculate new position
-    var nextX = this.x + (this.direction==1?1:this.direction==3?-1:0)
-    var nextY = this.y + (this.direction==2?1:this.direction==0?-1:0)
-
-    //check if out of bounds
-    if ((state[nextY]||[])[nextX] === undefined){
-      this.alive = false
-      reward[botDirection] -= .25
-      this.agent.train(currState, null, reward)
-      return [this.playerId, null, []]
-    }
-
-    var nb = state[nextY][nextX]
-    var nbPlayerId = nb.replace(/(^\d+)(.+$)/i,'$1');
-    var nbType = nb.substr(-1)
-
-    if(nbType == 'c' && nbPlayerId!=this.playerId)
-      reward[botDirection] += .1
-    if(nbType == 't'){
-      if(nbPlayerId==this.playerId){
-        this.alive = false
-        reward[botDirection] -= .25
-        this.agent.train(currState, null, reward)
-        return [this.playerId, null, []]
-      }
-      else{
-        reward[botDirection] += .8
-        ret = nbPlayerId
-      }
-    }
-
-    if(!([nextY,nextX] in this.conqueredSpace)){
-      this.trail[[nextY,nextX]] = state[nextY][nextX];
-      if(Object.keys(this.trail).length==1)
-        this.trailStart = [this.y,this.x]
-      //else if(Object.keys(this.trail).length>6)
-      //  reward[botDirection] -= (6-Object.keys(this.trail).length) * .1
-    }
-
-
-    //perform move
-    state[this.y][this.x] = this.playerId+(([this.y,this.x] in this.conqueredSpace)?'c':'t');
-    [this.x, this.y] = [nextX, nextY]
-    state[this.y][this.x] = this.playerId+'p';
-
-    //accumulate new conquered space
-    if([nextY,nextX] in this.conqueredSpace){
-      reward[botDirection] -= 0.05
-      this.trailStart = null
-      if(Object.keys(this.trail).length > 0){
-        const [score, conc] = this.fillConquered(state)
-        reward[botDirection] += score*.1
-        //var nextState = this.nnInput(state, Object.keys(this.trail).length)
-        this.agent.train(currState, null, reward)
-        this.trail = {}
-        return [ret, conc]
-      }
-    }
-    else {
-      //reward[botDirection] += 0.01
-    }
-
-    //train
-    this.nnInput(state, true)
-    if(this.bot){
-      var nextState = this.nnInput(state)
-      this.agent.train(currState, nextState, reward)
-    }
-    return [ret, null, []]
-  }
-
-  nnInput(state, show = false){
-    var xShift = Math.floor(this.visionArea[0]/2)
-    var yShift = Math.floor(this.visionArea[1]/2)
-
-    var vis = state.filter((_, i) => i >= (this.y-yShift) && i < (this.y-yShift + this.visionArea[1])).map(a => a.slice(Math.max(0,this.x-xShift), Math.max(0,this.x-xShift) + this.visionArea[0]+Math.min(0,this.x-xShift)))
-    if(vis[0].length<this.visionArea[0] && this.x>state[0].length/2)
+    if(vis[0].length<x && this.x>state[0].length/2)
       for (var i = 0; i < vis.length; i++)
-        vis[i].push(...Array(this.visionArea[0]-vis[i].length).fill("W"));
-    else if(vis[0].length<this.visionArea[0] && this.x<state[0].length/2)
+        vis[i].push(...Array(x-vis[i].length).fill(new Cell(null,Under.wall)));
+    else if(vis[0].length<x && this.x<state[0].length/2)
       for (var i = 0; i < vis.length; i++)
-        vis[i].unshift(...Array(this.visionArea[0]-vis[i].length).fill("W"));
-    if(vis.length<this.visionArea[1] && this.y>state.length/2)
-      for (var i = vis.length; i < this.visionArea[1]; i++)
-        vis.push(Array(this.visionArea[1]).fill("W"))
-    else if(vis.length<this.visionArea[1] && this.y<state.length/2)
-      for (var i = vis.length; i < this.visionArea[1]; i++)
-        vis.unshift(Array(this.visionArea[1]).fill("W"))
-
+        vis[i].unshift(...Array(x-vis[i].length).fill(new Cell(null,Under.wall)));
+    if(vis.length<y && this.y>state.length/2)
+      for (var i = vis.length; i < y; i++)
+        vis.push(Array(y).fill(new Cell(null,Under.wall)))
+    else if(vis.length<y && this.y<state.length/2)
+      for (var i = vis.length; i < y; i++)
+        vis.unshift(Array(y).fill(new Cell(null,Under.wall)))
         if(this.direction == 3)
-          vis = vis[0].map((val, index) => vis.map(row => row[index]).reverse())
-          else if(this.direction == 2)
-          vis.reverse().forEach(function(item) { item.reverse(); } );
-          else if(this.direction == 1){
-            vis = vis.map(function(row) {
-              return row.reverse();
-            });
-            for (var i = 0; i < vis.length; i++) {
-              for (var j = 0; j < i; j++) {
-                var temp = vis[i][j];
-                vis[i][j] = vis[j][i];
-                vis[j][i] = temp;
-              }
+        vis = vis[0].map((val, index) => vis.map(row => row[index]).reverse())
+        else if(this.direction == 2)
+        vis.reverse().forEach(function(item) { item.reverse(); } );
+        else if(this.direction == 1){
+          vis = vis.map(function(row) {
+            return row.reverse();
+          });
+          for (var i = 0; i < vis.length; i++) {
+            for (var j = 0; j < i; j++) {
+              var temp = vis[i][j];
+              vis[i][j] = vis[j][i];
+              vis[j][i] = temp;
             }
           }
+        }
 
-    //if(false){
-    //playerViewCtx.clearRect(0, 0, 220, 220);
-    //for(var i=0; i<vis.length; i++){
-    //    for(var j=0; j<vis[0].length; j++){
-    //      var player = vis[i][j].replace(/(^\d+)(.+$)/i,'$1')
-    //      var type = vis[i][j].substr(-1)
+    if(playerCtx){
+      playerCtx.clearRect(0, 0, 220, 220);
+      for(var i=0; i<vis.length; i++){
+        for(var j=0; j<vis[0].length; j++){
+          let [uid,ut,oid,ot] = [vis[i][j].uid, vis[i][j].under, vis[i][j].oid, vis[i][j].over];
 
-    //      playerViewCtx.beginPath();
-    //      playerViewCtx.shadowOffsetY = 0;
+          playerCtx.beginPath();
+          playerCtx.shadowOffsetY = 0;
 
-    //      var color = 'rgba(10,10,10,0)'
-    //      if(type == "t") color = 'rgba(10,10,180,0.5)'
-    //      else if(type == "c") color = 'rgba(10,10,180,1)'
-    //      else if(type == "p") color = 'rgba(10,10,180,1)'
-    //      else if(type == "W") color = 'rgba(108,122,137, .8)'
+          var color = 'rgba(255,255,255,.0)'
+          if(ut === Under.wall) color = 'rgba(0,0,0, .8)';
+          else if(ot === Over.trail && oid === this.playerId) color = this.trailColor;
+          else if(ot === Over.trail && oid !== this.playerId) color = 'rgba(220,220,220, .4)';
+          else if(ot === Over.player && oid === this.playerId) color = this.color;
+          else if(ot === Over.player && oid !== this.playerId) color = 'rgba(220,220,220, 1)';
+          else if(ut === Under.conquered && uid === this.playerId) color = this.conquerColor;
+          else if(ut === Under.conquered && uid !== this.playerId) color = 'rgba(220,220,220, .7)';
 
-    //      playerViewCtx.fillStyle = color;
-    //      playerViewCtx.rect(j*this.size, i*this.size, this.size, this.size);
-    //      playerViewCtx.fill();
-    //    }
-    //  }
-    //}
+          let sz = 20
+          playerCtx.fillStyle = color;
+          playerCtx.rect(j*sz, i*sz, sz,sz);
+          playerCtx.fill();
+        }
+      }
+    }
 
-
+    let tooFar = true;
     for(var i=0; i<vis.length; i++){
         for(var j=0; j<vis[0].length; j++){
-          var player = vis[i][j].replace(/(^\d+)(.+$)/i,'$1')
-          var type = vis[i][j].substr(-1)
+          let [uid,ut,oid,ot] = [vis[i][j].uid, vis[i][j].under, vis[i][j].oid, vis[i][j].over];
 
-          if(type == '0')
-            vis[i][j] = [0,0,0,0,0,0]
-          else if(type == 'W')
-            vis[i][j] = [1,0,0,0,0,0]
-
-          else if(player == this.playerId){
-            if(type == 't')
-              vis[i][j] = [0,1,0,0,0,0]
-            else if(type == 'c')
-            {
-              this.near = true
-              vis[i][j] = [0,0,1,0,0,0]
-            }
-            else if(type == 'p')
-              vis[i][j] = []
-          }
-          else{
-            if(type == 't')
-              vis[i][j] = [0,0,0,1,0,0]
-            else if(type == 'c')
-              vis[i][j] = [0,0,0,0,1,0]
-            else if(type == 'p')
-              vis[i][j] = [0,0,0,0,0,1]
-          }
+          vis[i][j] = [0,0,0,0,0,0];
+          if(ut === Under.wall) vis[i][j]  = [1,0,0,0,0,0];
+          else if(ot === Over.trail && oid === this.playerId) vis[i][j] = [0,1,0,0,0,0];
+          else if(ot === Over.trail && oid !== this.playerId) vis[i][j] = [0,0,1,0,0,0];
+          else if(ot === Over.player && oid === this.playerId) vis[i][j] = [];
+          else if(ot === Over.player && oid !== this.playerId)  vis[i][j] = [0,0,0,1,0,0];
+          else if(ut === Under.conquered && uid === this.playerId) {tooFar=false; vis[i][j] = [0,0,0,0,1,0]}
+          else if(ut === Under.conquered && uid !== this.playerId) vis[i][j] = [0,0,0,0,0,1];
         }
     }
-    return vis.flat().flat()//.concat([Object.keys(this.trail).length/10])
-  }
-
-  joinGame(state, x, y){
-    for(var i=-1; i<2; i++)
-      for(var j=-1; j<2; j++){
-        this.conqueredSpace[[y+j,x+i]]=1
-        state[y+j][x+i] = this.playerId + 'c';
-      }
-      state[y][x] = this.playerId + 'p';
+    return [vis.flat().flat(),tooFar]
   }
 }

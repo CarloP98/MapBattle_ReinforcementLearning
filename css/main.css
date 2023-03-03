@@ -3,6 +3,10 @@ html,body{
   width: 100%;
 }
 
+h1,h3 {
+  color: white;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -11,11 +15,12 @@ html,body{
 }
 
 body {
-    background: #f5f5f5 url('../img/squares.png') repeat;
+    background: #141414 url('../img/squares.png') repeat;
 }
 
 canvas{
-  background-color: rgba(0, 0, 0, 0.1);
+  background-color: rgba(0, 0, 0, 0.7);
+  border:3px solid #000000;
 }
 
 #wrapper {
@@ -27,76 +32,4 @@ canvas{
 #div2 {
     display: inline-block;
     width:80px;
-}
-
-
-
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 70px;
-  height: 34px;
-  text-align: center;
-}
-
-.switch input {display:none;}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(250,128,114,.7);
-  -webkit-transition: .4s;
-  transition: .4s;
-   border-radius: 10px;
-}
-
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  -webkit-transition: .4s;
-  transition: .4s;
-  font-weight: bold;
-  border-radius: 10px;
-}
-
-input:checked + .slider {
-  background-color: rgba(50,205,50,.7);
-}
-
-input:focus + .slider {
-  box-shadow: 0 0 1px #2196F3;
-}
-
-input:checked + .slider:before {
-  -webkit-transform: translateX(6px);
-  -ms-transform: translateX(6px);
-  transform: translateX(35px);
-}
-
-.slider:after
-{
- content:'';
- color: white;
- display: block;
- position: absolute;
- transform: translate(-50%,-50%);
- top: 50%;
- left: 80%;
- font-size: 12px;
- font-weight: bold;
-}
-
-input:checked + .slider:after
-{
- left: 20%;
-  content:'';
 }
